@@ -9,11 +9,9 @@ typedef unsigned long	ULONG;
 //////////////////////////////////////////////////////////////////////////////
 // Timer1 int handler (input capture)
 
-#define OutPulseEnable()	( TCNT3 = 0xFFFF, TCCR3B |= 3 )		// prescaler: 1/64
-#define OutPulseDisable()	( TCCR3B &= ~0x7 )	// stop timer
-
 volatile UINT g_uInPulseWidth;
-volatile UCHAR g_uState = 0;
+#define STOP	0xFFFF
+#define START	0xFFFE
 
 ISR( TIMER1_CAPT_vect ){
 	
@@ -21,41 +19,30 @@ ISR( TIMER1_CAPT_vect ){
 	
 	static UINT uPrevCnt = 0;
 	UINT uCnt = ICR1;
-	g_uInPulseWidth = uCnt - uPrevCnt;
+	if( g_uInPulseWidth == STOP ){
+		g_uInPulseWidth = START;
+	}else{
+		g_uInPulseWidth = uCnt - uPrevCnt;
+	}
 	uPrevCnt = uCnt;
 	
 	TCNT4 = 0; // reset sv wdt
-	
-	if( g_uState < 2 ){
-		if( g_uState == 1 ){
-			// 2パルス入力されたので，パルス出力可能になる
-			OutPulseEnable();
-		}
-		++g_uState;
-	}
 }
 
 //////////////////////////////////////////////////////////////////////////////
 // Timer3 overflow int handler (output vs pulse)
 
+#define OutPulseEnable()	( TCNT3 = 0xFFFF, TCCR3B |= 3 )		// prescaler: 1/64
+#define OutPulseDisable()	( TCCR3B &= ~0x7 )	// stop timer
+#define IsOutPulseEnabled()	( TCCR3B & 0x7 )
+
+volatile UINT g_uOutPulseWidth;
+
 ISR( TIMER3_OVF_vect ){
-	UINT uPulseWidth = g_uInPulseWidth;
-	UINT uPulseWidthAdjust;
+	UINT uPulseWidth = g_uOutPulseWidth;
 	
-	interrupts();
-	
-	if(
-		SCALE < 1.0 &&
-		uPulseWidth >= ( UINT )( 0xFFFFUL * SCALE )
-	){
-		// 除算後 0xFFFF を超えそうな場合
-		uPulseWidthAdjust = 0xFFFF;
-	}else{
-		uPulseWidthAdjust = (( ULONG )uPulseWidth * (( ULONG )( 0x10000 / SCALE ))) >> 16;
-	}
-	
-	OCR3A = uPulseWidthAdjust >> 1;
-	ICR3  = uPulseWidthAdjust - 1;
+	OCR3A = uPulseWidth >> 1;
+	ICR3  = uPulseWidth - 1;
 	
 	static UCHAR uLed = 0;
 	if( uLed ^= 1 ){ RXLED1; }else{ RXLED0; }
@@ -69,7 +56,7 @@ ISR( TIMER4_OVF_vect ){
 	
 	// ovf 発生は 0.3km/h 未満を意味するので，パルス出力を停止する
 	OutPulseDisable();
-	g_uState = 0;
+	g_uInPulseWidth = STOP;
 }
 
 //////////////////////////////////////////////////////////////////////////////
@@ -127,17 +114,46 @@ void setup(){
 	//////////////////////////////////////////////////////////////////////////
 	// for debug
 	
-	pinMode( 8, OUTPUT );
-	pinMode( 9, OUTPUT );
+	//pinMode( 8, OUTPUT );
+	//pinMode( 9, OUTPUT );
 }
 
 //////////////////////////////////////////////////////////////////////////////
 
 void loop(){
-	delay( 50 );
-	#ifdef DEBUG
-		Serial.println( g_uState >= 2 ? g_uInPulseWidth : 0 );
-	#endif
 	
-	static char cLed = 0; digitalWrite( 8, cLed ^= 1 );
+	static UINT		uPrevPulseWidth	= ~0;
+	
+	UINT	uPulseWidth;
+	
+	// ステート変更まち
+	while( 1 ){
+		noInterrupts();
+		uPulseWidth	= g_uInPulseWidth;
+		interrupts();
+		
+		if( uPulseWidth < START && uPulseWidth != uPrevPulseWidth ) break;
+	}
+	
+	uPrevPulseWidth	= uPulseWidth;
+	
+	// 補正パルス幅の計算
+	UINT uPulseWidthAdjust;
+	
+	if(
+		SCALE < 1.0 &&
+		uPulseWidth >= ( UINT )( 0xFFFFUL * SCALE )
+	){
+		// 除算後 0xFFFF を超えそうな場合
+		uPulseWidthAdjust = 0xFFFF;
+	}else{
+		uPulseWidthAdjust = (( ULONG )uPulseWidth * (( ULONG )( 0x10000 / SCALE ))) >> 16;
+	}
+	
+	noInterrupts();
+	g_uOutPulseWidth = uPulseWidthAdjust;
+	interrupts();
+	
+	// パルス出力再開
+	if( !IsOutPulseEnabled()) OutPulseEnable();
 }
