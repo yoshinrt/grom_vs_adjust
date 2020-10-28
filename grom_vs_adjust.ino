@@ -39,10 +39,7 @@ ISR( TIMER1_CAPT_vect ){
 volatile UINT g_uOutPulseWidth;
 
 ISR( TIMER3_OVF_vect ){
-	UINT uPulseWidth = g_uOutPulseWidth;
-	
-	OCR3A = uPulseWidth >> 1;
-	ICR3  = uPulseWidth - 1;
+	ICR3  = g_uOutPulseWidth - 1;
 	
 	static UCHAR uLed = 0;
 	if( uLed ^= 1 ){ RXLED1; }else{ RXLED0; }
@@ -57,6 +54,7 @@ ISR( TIMER4_OVF_vect ){
 	// ovf 発生は 0.3km/h 未満を意味するので，パルス出力を停止する
 	OutPulseDisable();
 	g_uInPulseWidth = STOP;
+	TXLED1;
 }
 
 //////////////////////////////////////////////////////////////////////////////
@@ -78,6 +76,8 @@ void setup(){
 	
 	TCCR3B =
 		(( WGM3 >> 2 ) << 3 );	// WGM3[3:2]
+	
+	OCR3A = 100;	// 225@100km/h だから ok のはず
 	
 	//////////////////////////////////////////////////////////////////////////
 	// setup Timer1 (capture)
@@ -153,6 +153,8 @@ void loop(){
 	noInterrupts();
 	g_uOutPulseWidth = uPulseWidthAdjust;
 	interrupts();
+	
+	TXLED0;
 	
 	// パルス出力再開
 	if( !IsOutPulseEnabled()) OutPulseEnable();
