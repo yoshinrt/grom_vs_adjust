@@ -1,4 +1,4 @@
-#define SCALE	0.905
+#define SCALE	( 0.905 / 2 * 16 / 15 )
 
 typedef unsigned char	UCHAR, BOOL;
 typedef unsigned		UINT;
